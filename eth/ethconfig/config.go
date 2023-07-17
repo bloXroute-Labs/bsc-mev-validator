@@ -248,7 +248,7 @@ type Config struct {
 	// SentryMinerUri is the sentry miner uri
 	SentryMinerUri string `toml:",omitempty"`
 
-	// SentryRelaysUri is the sentry relay uri
+	// SentryRelaysUri is the list of sentry relay uri
 	SentryRelaysUri []string `toml:",omitempty"`
 }
 

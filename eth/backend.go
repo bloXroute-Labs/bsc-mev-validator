@@ -280,7 +280,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.sentryProxy = new(sentryProxy)
 
 	if len(config.SentryMinerUri) == 0 {
-		log.Error("Miner URL is empty")
+		log.Error("Miner URI is empty")
 	} else {
 		eth.sentryProxy.minerClient, err = rpc.Dial(config.SentryMinerUri)
 		if err != nil {

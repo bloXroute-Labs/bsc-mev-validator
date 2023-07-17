@@ -57,6 +57,7 @@ type Node struct {
 	lifecycles    []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
 	rpcAPIs       []rpc.API   // List of APIs currently provided by the node
 	http          *httpServer //
+	httpSecuredIP *httpServer
 	ws            *httpServer //
 	ipc           *ipcServer  // Stores information about the ipc http server
 	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
@@ -173,6 +174,7 @@ func New(conf *Config) (*Node, error) {
 
 	// Configure RPC servers.
 	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
+	node.httpSecuredIP = newHTTPServer(node.log, conf.HTTPTimeouts)
 	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
 	node.ipc = newIPCServer(node.log, conf.IPCEndpoint())
 
@@ -392,6 +394,22 @@ func (n *Node) startRPC() error {
 		}
 	}
 
+	// Configure HTTP secured by IP.
+	if n.config.HTTPHost != "" && n.config.HTTPSecuredIPPort != 0 {
+		config := httpConfig{
+			CorsAllowedOrigins: n.config.HTTPCors,
+			AllowedIPs:         n.config.HTTPSecuredIPAllowedIPs,
+			Modules:            n.config.HTTPSecuredIPModules,
+			prefix:             n.config.HTTPPathPrefix,
+		}
+		if err := n.httpSecuredIP.setListenAddr(n.config.HTTPHost, n.config.HTTPSecuredIPPort); err != nil {
+			return err
+		}
+		if err := n.httpSecuredIP.enableRPC(n.rpcAPIs, config); err != nil {
+			return err
+		}
+	}
+
 	// Configure WebSocket.
 	if n.config.WSHost != "" {
 		server := n.wsServerForPort(n.config.WSPort)
@@ -411,6 +429,9 @@ func (n *Node) startRPC() error {
 	if err := n.http.start(); err != nil {
 		return err
 	}
+	if err := n.httpSecuredIP.start(); err != nil {
+		return err
+	}
 	return n.ws.start()
 }
 
@@ -423,6 +444,7 @@ func (n *Node) wsServerForPort(port int) *httpServer {
 
 func (n *Node) stopRPC() {
 	n.http.stop()
+	n.httpSecuredIP.stop()
 	n.ws.stop()
 	n.ipc.stop()
 	n.stopInProc()

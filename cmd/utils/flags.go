@@ -649,6 +649,21 @@ var (
 		Usage: "HTTP path path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
 		Value: "",
 	}
+	HTTPSecuredIPPortFlag = cli.IntFlag{
+		Name:  "http.securedipport",
+		Usage: "HTTP-RPC server secured by IP listening port",
+		Value: node.DefaultHTTPSecuredIPPort,
+	}
+	HTTPSecuredIPAllowedIPsFlag = cli.StringFlag{
+		Name:  "http.securedipvallowedipss",
+		Usage: "Comma separated list of IPs from which to accept requests (server enforced). Accepts '*' wildcard.",
+		Value: strings.Join(node.DefaultConfig.HTTPSecuredIPAllowedIPs, ","),
+	}
+	HTTPSecuredIPApiFlag = cli.StringFlag{
+		Name:  "http.securedipapi",
+		Usage: "Comma separated list of API's offered over the HTTP-RPC secured by IP interface",
+		Value: "",
+	}
 	GraphQLEnabledFlag = cli.BoolFlag{
 		Name:  "graphql",
 		Usage: "Enable GraphQL on the HTTP-RPC server. Note that GraphQL can only be started if an HTTP server is started as well.",
@@ -1096,6 +1111,42 @@ func setHTTP(ctx *cli.Context, cfg *node.Config) {
 	}
 }
 
+// setHTTPSecuredIP creates the HTTP MEV RPC listener interface string from the set
+// command line flags, returning empty if the HTTP endpoint is disabled.
+func setHTTPSecuredIP(ctx *cli.Context, cfg *node.Config) {
+	if ctx.GlobalBool(HTTPEnabledFlag.Name) {
+		if cfg.HTTPHost == "" {
+			cfg.HTTPHost = "127.0.0.1"
+		}
+		if ctx.GlobalIsSet(HTTPListenAddrFlag.Name) {
+			cfg.HTTPHost = ctx.GlobalString(HTTPListenAddrFlag.Name)
+		}
+	}
+
+	if ctx.GlobalIsSet(HTTPSecuredIPPortFlag.Name) {
+		cfg.HTTPSecuredIPPort = ctx.GlobalInt(HTTPSecuredIPPortFlag.Name)
+	}
+
+	if ctx.GlobalIsSet(HTTPCORSDomainFlag.Name) {
+		cfg.HTTPCors = SplitAndTrim(ctx.GlobalString(HTTPCORSDomainFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(HTTPSecuredIPApiFlag.Name) {
+		cfg.HTTPSecuredIPModules = SplitAndTrim(ctx.GlobalString(HTTPSecuredIPApiFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(HTTPSecuredIPAllowedIPsFlag.Name) {
+		cfg.HTTPSecuredIPAllowedIPs = SplitAndTrim(ctx.GlobalString(HTTPSecuredIPAllowedIPsFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(HTTPPathPrefixFlag.Name) {
+		cfg.HTTPPathPrefix = ctx.GlobalString(HTTPPathPrefixFlag.Name)
+	}
+	if ctx.GlobalIsSet(AllowUnprotectedTxs.Name) {
+		cfg.AllowUnprotectedTxs = ctx.GlobalBool(AllowUnprotectedTxs.Name)
+	}
+}
+
 // setGraphQL creates the GraphQL listener interface string from the set
 // command line flags, returning empty if the GraphQL endpoint is disabled.
 func setGraphQL(ctx *cli.Context, cfg *node.Config) {
@@ -1362,6 +1413,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	SetP2PConfig(ctx, &cfg.P2P)
 	setIPC(ctx, cfg)
 	setHTTP(ctx, cfg)
+	setHTTPSecuredIP(ctx, cfg)
 	setGraphQL(ctx, cfg)
 	setWS(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)

@@ -80,7 +80,7 @@ func (p *sentryProxy) RegisterValidator(ctx context.Context, args *ethapi.Regist
 }
 
 // ProposedBlock add the block to the list of works
-func (p *sentryProxy) ProposedBlock(ctx context.Context, args *ethapi.ProposedBlockArgs) error {
+func (p *sentryProxy) ProposedBlock(ctx context.Context, args *ethapi.ProposedBlockArgs, namespace string) error {
 	noPayloadArgs := *args
 	noPayloadArgs.Payload = nil
 
@@ -92,7 +92,7 @@ func (p *sentryProxy) ProposedBlock(ctx context.Context, args *ethapi.ProposedBl
 
 	var result any
 
-	err := p.minerClient.CallContext(ctx, &result, "eth_proposedBlock", args)
+	err := p.minerClient.CallContext(ctx, &result, fmt.Sprintf("%v_proposedBlock", namespace), args)
 	if err == nil {
 		return nil
 	}

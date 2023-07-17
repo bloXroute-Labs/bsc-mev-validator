@@ -30,6 +30,7 @@ var Modules = map[string]string{
 	"txpool":   TxpoolJs,
 	"les":      LESJs,
 	"vflux":    VfluxJs,
+	"mev":      MEVJs,
 }
 
 const CliqueJs = `
@@ -847,6 +848,19 @@ web3._extend({
 		new web3._extend.Property({
 			name: 'requestStats',
 			getter: 'vflux_requestStats'
+		}),
+	]
+});
+`
+
+const MEVJs = `
+web3._extend({
+	property: 'mev',
+	methods: [
+		new web3._extend.Method({
+			name: 'proposedBlock',
+			call: 'mev_proposedBlock',
+			params: 1,
 		}),
 	]
 });
