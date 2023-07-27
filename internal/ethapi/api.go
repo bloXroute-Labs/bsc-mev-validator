@@ -2317,10 +2317,11 @@ func (s *PublicTransactionPoolAPI) Resend(ctx context.Context, sendArgs Transact
 
 // RegisterValidatorArgs represents the arguments to register a validator.
 type RegisterValidatorArgs struct {
-	Data      hexutil.Bytes `json:"data"` // bytes of string with callback ProposedBlockUri
-	Signature hexutil.Bytes `json:"signature"`
-	IsSentry  bool          `json:"isSentry"`
-	Namespace string        `json:"namespace"`
+	Data       hexutil.Bytes `json:"data"` // bytes of string with callback ProposedBlockUri
+	Signature  hexutil.Bytes `json:"signature"`
+	IsSentry   bool          `json:"isSentry"`
+	Namespace  string        `json:"namespace"`
+	CommitHash string        `json:"commitHash,omitempty"`
 }
 
 // RegisterValidator registers a validator for the next epoch to the pool of proposing destinations.

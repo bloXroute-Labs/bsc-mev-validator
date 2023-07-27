@@ -158,7 +158,7 @@ type Config struct {
 	// HTTPSecuredIPModules is a list of API modules to expose via the HTTP RPC secured by IP interface.
 	// If the module list is empty, all RPC API endpoints designated public will be
 	// exposed.
-	HTTPSecuredIPModules []string
+	HTTPSecuredIPModules []string `toml:",omitempty"`
 
 	// WSHost is the host interface on which to start the websocket RPC server. If
 	// this field is empty, no websocket API endpoint will be started.
