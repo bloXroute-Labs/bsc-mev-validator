@@ -1767,10 +1767,10 @@ type ProposedBlockArgs struct {
 }
 
 // ProposedBlock will submit the block to the miner worker
-func (s *PublicBlockChainAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) error {
+func (s *PublicBlockChainAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) (any, error) {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	default:
 		return s.b.ProposedBlock(ctx, &args, "eth")
 	}
@@ -2489,10 +2489,10 @@ func NewPublicMEVAPI(b Backend) *PublicMEVAPI {
 }
 
 // ProposedBlock will submit the block to the miner worker
-func (s *PublicMEVAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) error {
+func (s *PublicMEVAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) (any, error) {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	default:
 		return s.b.ProposedBlock(ctx, &args, "mev")
 	}

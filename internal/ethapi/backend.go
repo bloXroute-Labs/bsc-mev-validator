@@ -86,7 +86,7 @@ type Backend interface {
 	TxPoolContentFrom(addr common.Address) (types.Transactions, types.Transactions)
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
 	RegisterValidator(ctx context.Context, args *RegisterValidatorArgs) error
-	ProposedBlock(ctx context.Context, args *ProposedBlockArgs, namespace string) error
+	ProposedBlock(ctx context.Context, args *ProposedBlockArgs, namespace string) (any, error)
 
 	// Filter API
 	BloomStatus() (uint64, uint64)

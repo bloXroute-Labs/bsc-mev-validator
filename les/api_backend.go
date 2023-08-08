@@ -351,6 +351,6 @@ func (b *LesApiBackend) RegisterValidator(context.Context, *ethapi.RegisterValid
 	return nil
 }
 
-func (b *LesApiBackend) ProposedBlock(context.Context, *ethapi.ProposedBlockArgs, string) error {
-	return nil
+func (b *LesApiBackend) ProposedBlock(context.Context, *ethapi.ProposedBlockArgs, string) (any, error) {
+	return nil, nil
 }

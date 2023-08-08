@@ -414,6 +414,6 @@ func (b *EthAPIBackend) RegisterValidator(ctx context.Context, args *ethapi.Regi
 	return b.eth.sentryProxy.RegisterValidator(ctx, args)
 }
 
-func (b *EthAPIBackend) ProposedBlock(ctx context.Context, args *ethapi.ProposedBlockArgs, namespace string) error {
+func (b *EthAPIBackend) ProposedBlock(ctx context.Context, args *ethapi.ProposedBlockArgs, namespace string) (any, error) {
 	return b.eth.sentryProxy.ProposedBlock(ctx, args, namespace)
 }
