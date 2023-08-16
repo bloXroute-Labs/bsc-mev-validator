@@ -1,0 +1,34 @@
+syntax = "proto3";
+package protobuf;
+import "google/protobuf/duration.proto";
+option go_package = ".";
+service Proposer{
+  rpc ProposeBlock(ProposeBlockRequest) returns (ProposeBlockResponse){}
+  rpc RegisterValidator(RegisterValidatorRequest) returns (RegisterValidatorResponse){}
+}
+
+message ProposeBlockRequest{
+  string id = 1;
+  string mev_relay = 2;
+  uint64 block_number = 3;
+  string prev_block_hash = 4;
+  uint64 block_reward = 5;
+  uint64 gas_limit = 6;
+  uint64 gas_used = 7;
+  repeated bytes payload = 8;
+  string namespace = 9;
+}
+message ProposeBlockResponse{
+  string received_at = 1;
+  google.protobuf.Duration simulated_duration = 2;
+  string response_sent_at = 3;
+}
+
+message RegisterValidatorRequest{
+  bytes data = 1;
+  bytes signature = 2;
+  string namespace = 3;
+  string commit_hash = 4;
+}
+message RegisterValidatorResponse{
+}

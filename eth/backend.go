@@ -18,6 +18,8 @@
 package eth
 
 import (
+	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"math/big"
@@ -51,6 +53,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/protocols/trust"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
+	pb "github.com/ethereum/go-ethereum/grpc/protobuf"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/internal/shutdowncheck"
 	"github.com/ethereum/go-ethereum/log"
@@ -62,6 +65,8 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -278,8 +283,23 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	eth.sentryProxy = new(sentryProxy)
-
-	if len(config.SentryMinerUri) == 0 {
+	var (
+		conn   *grpc.ClientConn
+		useRPC = len(config.SentryMinerGrpcUri) == 0
+	)
+	if !useRPC {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		tlsConfig := &tls.Config{InsecureSkipVerify: true}
+		tlsCredentials := credentials.NewTLS(tlsConfig)
+		conn, err = grpc.DialContext(ctx, config.SentryMinerGrpcUri, grpc.WithTransportCredentials(tlsCredentials))
+		if err != nil {
+			useRPC = true
+		} else {
+			eth.sentryProxy.minerGrpcClient = pb.NewProposerClient(conn)
+		}
+	}
+	if useRPC && len(config.SentryMinerUri) == 0 {
 		log.Error("Miner URI is empty")
 	} else {
 		eth.sentryProxy.minerClient, err = rpc.Dial(config.SentryMinerUri)
@@ -287,7 +307,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			log.Error("Failed to dial miner", "minerUri", config.SentryMinerUri, "err", err)
 		}
 	}
-
 	for _, relayUri := range config.SentryRelaysUri {
 		var relayClient *rpc.Client
 

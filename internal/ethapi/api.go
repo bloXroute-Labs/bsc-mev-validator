@@ -1755,24 +1755,13 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 	}
 }
 
-// ProposedBlockArgs are the arguments for the ProposedBlock RPC
-type ProposedBlockArgs struct {
-	MEVRelay      string          `json:"mevRelay,omitempty"`
-	BlockNumber   rpc.BlockNumber `json:"blockNumber"`
-	PrevBlockHash common.Hash     `json:"prevBlockHash"`
-	BlockReward   *big.Int        `json:"blockReward"`
-	GasLimit      uint64          `json:"gasLimit"`
-	GasUsed       uint64          `json:"gasUsed"`
-	Payload       []hexutil.Bytes `json:"payload"`
-}
-
 // ProposedBlock will submit the block to the miner worker
-func (s *PublicBlockChainAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) (any, error) {
+func (s *PublicBlockChainAPI) ProposedBlock(ctx context.Context, args *ProposedBlockArgs) (any, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
-		return s.b.ProposedBlock(ctx, &args, "eth")
+		return s.b.ProposedBlock(ctx, args, "eth")
 	}
 }
 
@@ -2486,6 +2475,17 @@ type PublicMEVAPI struct {
 // NewPublicMEVAPI creates a new MEV protocol API.
 func NewPublicMEVAPI(b Backend) *PublicMEVAPI {
 	return &PublicMEVAPI{b}
+}
+
+// ProposedBlockArgs are the arguments for the ProposedBlock RPC
+type ProposedBlockArgs struct {
+	MEVRelay      string          `json:"mevRelay,omitempty"`
+	BlockNumber   rpc.BlockNumber `json:"blockNumber"`
+	PrevBlockHash common.Hash     `json:"prevBlockHash"`
+	BlockReward   *big.Int        `json:"blockReward"`
+	GasLimit      uint64          `json:"gasLimit"`
+	GasUsed       uint64          `json:"gasUsed"`
+	Payload       any             `json:"payload"`
 }
 
 // ProposedBlock will submit the block to the miner worker
