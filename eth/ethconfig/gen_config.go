@@ -25,7 +25,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		EthDiscoveryURLs                []string
 		SnapDiscoveryURLs               []string
 		TrustDiscoveryURLs              []string
-		BscDiscoveryURLs                []string
+		BscDiscoveryURLs               []string
 		NoPruning                       bool
 		NoPrefetch                      bool
 		DirectBroadcast                 bool
@@ -154,7 +154,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		EthDiscoveryURLs                []string
 		SnapDiscoveryURLs               []string
 		TrustDiscoveryURLs              []string
-		BscDiscoveryURLs                []string
+		BscDiscoveryURLs               []string
 		NoPruning                       *bool
 		NoPrefetch                      *bool
 		DirectBroadcast                 *bool
