@@ -34,7 +34,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/ethereum/go-ethereum/grpc"
 	"github.com/fatih/structs"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	gopsutil "github.com/shirou/gopsutil/mem"
@@ -550,10 +549,6 @@ var (
 	SentryRelaysUriFlag = cli.StringSliceFlag{
 		Name:  "sentry.relaysuri",
 		Usage: "Slice of MEV relay uris sending the registration from the validator node",
-	}
-	SentryMinerGrpcUriFlag = cli.StringFlag{
-		Name:  "sentry.minergrpcuri",
-		Usage: "GRPC Uri used by the proxy forwarding blocks from the relay to the validator",
 	}
 	// Account settings
 	UnlockedAccountFlag = cli.StringFlag{
@@ -1241,7 +1236,6 @@ func setLes(ctx *cli.Context, cfg *ethconfig.Config) {
 func setSentry(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.SentryMinerUri = ctx.GlobalString(SentryMinerUriFlag.Name)
 	cfg.SentryRelaysUri = ctx.GlobalStringSlice(SentryRelaysUriFlag.Name)
-	cfg.SentryMinerGrpcUri = ctx.GlobalString(SentryMinerGrpcUriFlag.Name)
 }
 
 // setMonitors enable monitors from the command line flags.
@@ -1978,11 +1972,6 @@ func RegisterEthService(stack *node.Node, cfg *ethconfig.Config) (ethapi.Backend
 		if err != nil {
 			Fatalf("Failed to register the Ethereum service: %v", err)
 		}
-		if cfg.SentryMinerGrpcUri != "" {
-			//setup grpc server
-			proposer := grpc.NewProposer(backend.ApiBackend)
-			stack.RegisterAPI(grpc.NewAPI(proposer, cfg.SentryMinerGrpcUri, "", ""))
-		}
 		stack.RegisterAPIs(tracers.APIs(backend.ApiBackend))
 		if backend.BlockChain().Config().TerminalTotalDifficulty != nil {
 			if err := lescatalyst.Register(stack, backend); err != nil {
@@ -2005,12 +1994,6 @@ func RegisterEthService(stack *node.Node, cfg *ethconfig.Config) (ethapi.Backend
 		if err := ethcatalyst.Register(stack, backend); err != nil {
 			Fatalf("Failed to register the catalyst service: %v", err)
 		}
-	}
-
-	if cfg.SentryMinerGrpcUri != "" {
-		//setup grpc server
-		proposer := grpc.NewProposer(backend.APIBackend)
-		stack.RegisterAPI(grpc.NewAPI(proposer, cfg.SentryMinerGrpcUri, "", ""))
 	}
 	stack.RegisterAPIs(tracers.APIs(backend.APIBackend))
 	return backend.APIBackend, backend

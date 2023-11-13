@@ -249,9 +249,6 @@ type Config struct {
 
 	// SentryRelaysUri is the list of sentry relay uri
 	SentryRelaysUri []string `toml:",omitempty"`
-
-	// SentryMinerGrpcUri is the sentry miner grpc uri
-	SentryMinerGrpcUri string `toml:",omitempty"`
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.

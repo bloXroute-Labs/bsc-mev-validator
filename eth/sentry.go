@@ -5,17 +5,42 @@ import (
 	"encoding/json"
 	"fmt"
 
-	pb "github.com/ethereum/go-ethereum/grpc/protobuf"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/google/uuid"
 )
 
 type sentryProxy struct {
-	minerClient     *rpc.Client
-	relayClients    []*rpc.Client
-	minerGrpcClient pb.ProposerClient
+	minerClient  *rpc.Client
+	relayClients []*rpc.Client
+}
+
+func logProxyingError(logName string, args any, result any, err error) {
+	logCtx := make([]any, 0)
+
+	if err != nil {
+		logCtx = append(logCtx, "err", err)
+	}
+
+	if args != nil {
+		argsBytes, argsMarshalErr := json.Marshal(args)
+		if argsMarshalErr != nil {
+			logCtx = append(logCtx, "argsMarshalErr", argsMarshalErr)
+		} else {
+			logCtx = append(logCtx, "args", string(argsBytes))
+		}
+	}
+
+	if result != nil {
+		resultBytes, resultMarshalErr := json.Marshal(result)
+		if resultMarshalErr != nil {
+			logCtx = append(logCtx, "resultMarshalErr", resultMarshalErr)
+		} else {
+			logCtx = append(logCtx, "result", string(resultBytes))
+		}
+	}
+
+	log.Error(logName, logCtx...)
 }
 
 // RegisterValidator register a validator
@@ -56,24 +81,9 @@ func (p *sentryProxy) RegisterValidator(ctx context.Context, args *ethapi.Regist
 
 // ProposedBlock add the block to the list of works
 func (p *sentryProxy) ProposedBlock(ctx context.Context, args *ethapi.ProposedBlockArgs, namespace string) (any, error) {
-
-	if p.minerGrpcClient != nil {
-		in := &pb.ProposeBlockRequest{
-			MevRelay:      args.MEVRelay,
-			BlockNumber:   uint64(args.BlockNumber.Int64()),
-			PrevBlockHash: args.PrevBlockHash.String(),
-			BlockReward:   args.BlockReward.Uint64(),
-			GasLimit:      args.GasLimit,
-			GasUsed:       args.GasUsed,
-			Payload:       args.Payload.([][]byte),
-			Id:            uuid.New().String(),
-			Namespace:     namespace,
-		}
-		return p.minerGrpcClient.ProposeBlock(ctx, in)
-
-	}
 	noPayloadArgs := *args
 	noPayloadArgs.Payload = nil
+
 	if p.minerClient == nil {
 		logProxyingError("No miner client", noPayloadArgs, nil, nil)
 
@@ -90,32 +100,4 @@ func (p *sentryProxy) ProposedBlock(ctx context.Context, args *ethapi.ProposedBl
 	logProxyingError("Failed to propose block to validator", noPayloadArgs, result, err)
 
 	return nil, err
-}
-
-func logProxyingError(logName string, args any, result any, err error) {
-	logCtx := make([]any, 0)
-
-	if err != nil {
-		logCtx = append(logCtx, "err", err)
-	}
-
-	if args != nil {
-		argsBytes, argsMarshalErr := json.Marshal(args)
-		if argsMarshalErr != nil {
-			logCtx = append(logCtx, "argsMarshalErr", argsMarshalErr)
-		} else {
-			logCtx = append(logCtx, "args", string(argsBytes))
-		}
-	}
-
-	if result != nil {
-		resultBytes, resultMarshalErr := json.Marshal(result)
-		if resultMarshalErr != nil {
-			logCtx = append(logCtx, "resultMarshalErr", resultMarshalErr)
-		} else {
-			logCtx = append(logCtx, "result", string(resultBytes))
-		}
-	}
-
-	log.Error(logName, logCtx...)
 }
