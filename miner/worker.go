@@ -26,6 +26,8 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+	lru "github.com/hashicorp/golang-lru"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -39,7 +41,6 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
-	lru "github.com/hashicorp/golang-lru"
 )
 
 const (
@@ -1242,9 +1243,17 @@ func (w *worker) getBestWorkBetweenInternalAndProposedBlock(internalWork *enviro
 
 	w.bestProposedBlockLock.RLock()
 	defer w.bestProposedBlockLock.RUnlock()
+
+	logCtx := []any{
+		"blockNumber", bestWork.header.Number,
+		"prevBlockHash", bestWork.header.ParentHash.String(),
+		"type", callerType,
+		"timestamp", time.Now().UTC().Format(timestampFormat),
+	}
+
 	works, ok := w.bestProposedBlockInfo[internalWork.header.Number.Uint64()]
 	if !ok || works == nil {
-		log.Info("Prefer internal block", "blockNumber", bestWork.header.Number, "prevBlockHash", bestWork.header.ParentHash.String(), "internalBlockReward", bestReward, "type", callerType, "timestamp", time.Now().UTC().Format(timestampFormat))
+		log.Info("Prefer internal or proposedBlock", append(logCtx, "internalBlockReward", internalBlockReward, "preferProposedBlock", preferProposedBlock)...)
 		return bestWork
 	}
 
@@ -1260,7 +1269,7 @@ func (w *worker) getBestWorkBetweenInternalAndProposedBlock(internalWork *enviro
 		}
 	}
 
-	log.Info("Prefer internal or proposedBlock", "blockNumber", bestWork.header.Number, "prevBlockHash", bestWork.header.ParentHash.String(), "preferProposedBlock", preferProposedBlock, "internalBlockReward", internalBlockReward, "proposedBlockReward", proposedBlockReward, "type", callerType, "timestamp", time.Now().UTC().Format(timestampFormat))
+	log.Info("Prefer internal or proposedBlock", append(logCtx, "internalBlockReward", internalBlockReward, "preferProposedBlock", preferProposedBlock, "proposedBlockReward", proposedBlockReward)...)
 	return bestWork
 }
 
