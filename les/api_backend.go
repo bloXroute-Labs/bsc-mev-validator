@@ -345,3 +345,15 @@ func (b *LesApiBackend) StateAtBlock(ctx context.Context, block *types.Block, re
 func (b *LesApiBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (core.Message, vm.BlockContext, *state.StateDB, error) {
 	return b.eth.stateAtTransaction(ctx, block, txIndex, reexec)
 }
+
+func (b *LesApiBackend) ProposedBlock(context.Context, string, *big.Int, common.Hash, *big.Int, uint64, uint64, types.Transactions, map[common.Hash]struct{}) (simDuration time.Duration, err error) {
+	return
+}
+
+func (b *LesApiBackend) AddRelay(context.Context, string) error {
+	return nil
+}
+
+func (b *LesApiBackend) RemoveRelay(context.Context, string) error {
+	return nil
+}

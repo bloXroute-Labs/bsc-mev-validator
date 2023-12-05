@@ -52,7 +52,12 @@ import (
 	"github.com/tyler-smith/go-bip39"
 )
 
-const UnHealthyTimeout = 5 * time.Second
+const (
+	UnHealthyTimeout = 5 * time.Second
+
+	// timestamp format
+	timestampFormat = "2006-01-02 15:04:05.000000"
+)
 
 // max is a helper function which returns the larger of the two given integers.
 func max(a, b int64) int64 {
@@ -1386,6 +1391,110 @@ func (s *PublicBlockChainAPI) GetVerifyResult(ctx context.Context, blockNr rpc.B
 	return s.b.Chain().GetVerifyResult(uint64(blockNr), blockHash, diffHash)
 }
 
+// RegisterValidatorArgs has the epoch and the uri to send the proposedBlock to the validator
+type RegisterValidatorArgs struct {
+	Data       hexutil.Bytes `json:"data"` // bytes of string with callback ProposedBlockUri
+	Signature  hexutil.Bytes `json:"signature"`
+	Namespace  string        `json:"namespace"`
+	CommitHash string        `json:"commitHash"`
+	GasCeil    uint64        `json:"gasCeil"`
+}
+
+func (s *PublicEthereumAPI) RegisterValidator(ctx context.Context, args RegisterValidatorArgs) error {
+	return nil
+}
+
+type ProposedBlockArgs struct {
+	MEVRelay         string          `json:"mevRelay,omitempty"`
+	BlockNumber      rpc.BlockNumber `json:"blockNumber"`
+	PrevBlockHash    common.Hash     `json:"prevBlockHash"`
+	BlockReward      *big.Int        `json:"blockReward"`
+	GasLimit         uint64          `json:"gasLimit"`
+	GasUsed          uint64          `json:"gasUsed"`
+	Payload          []hexutil.Bytes `json:"payload"`
+	UnRevertedHashes []common.Hash   `json:"unRevertedHashes,omitempty"`
+}
+
+type ProposedBlockResponse struct {
+	ReceivedAt        string        `json:"receivedAt"`
+	SimulatedDuration time.Duration `json:"simulatedDuration"`
+	ResponseSentAt    string        `json:"responseSentAt"`
+}
+
+// ProposedBlock will validate the block and will submit it to the miner worker
+func (s *PublicBlockChainAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) (*ProposedBlockResponse, error) {
+	return proposedBlock(ctx, args, s.b.CurrentBlock(), s.b)
+}
+
+func proposedBlock(ctx context.Context, args ProposedBlockArgs, currentBlock *types.Block, b MEVBackend) (*ProposedBlockResponse, error) {
+	var (
+		receivedAt = time.Now().UTC()
+		txs        types.Transactions
+	)
+	if len(args.Payload) == 0 {
+		return nil, errors.New("block missing txs")
+	}
+	if args.BlockNumber == 0 {
+		return nil, errors.New("block missing blockNumber")
+	}
+
+	blockOnChain := currentBlock.Number()
+	proposedBlockNumber := big.NewInt(args.BlockNumber.Int64())
+
+	if proposedBlockNumber.Cmp(blockOnChain) < 1 {
+		log.Info("Validating ProposedBlock failed", "blockNumber", args.BlockNumber, "onChainBlockNumber", blockOnChain, "onChainBlockHash", currentBlock.Hash(), "prevBlockHash", args.PrevBlockHash, "mevRelay", args.MEVRelay)
+		return nil, fmt.Errorf("blockNumber is incorrect. proposedBlockNumber: %v onChainBlockNumber: %v onChainBlockHash %v", args.BlockNumber, blockOnChain, currentBlock.Hash().String())
+	}
+	for _, encodedTx := range args.Payload {
+		tx := new(types.Transaction)
+		if err := tx.UnmarshalBinary(encodedTx); err != nil {
+			return nil, err
+		}
+		txs = append(txs, tx)
+	}
+
+	unRevertedHashes := make(map[common.Hash]struct{}, len(args.UnRevertedHashes))
+	for _, hash := range args.UnRevertedHashes {
+		unRevertedHashes[hash] = struct{}{}
+	}
+
+	simDuration, err := b.ProposedBlock(ctx, args.MEVRelay, proposedBlockNumber, args.PrevBlockHash, args.BlockReward, args.GasLimit, args.GasUsed, txs, unRevertedHashes)
+	if err != nil {
+		return nil, err
+	}
+	return &ProposedBlockResponse{
+		ReceivedAt:        receivedAt.Format(timestampFormat),
+		SimulatedDuration: simDuration,
+		ResponseSentAt:    time.Now().UTC().Format(timestampFormat),
+	}, nil
+}
+
+type AddRelayArgs struct {
+	MEVRelay string `json:"mevRelay"`
+}
+
+// AddRelay will submit the block to the miner worker
+func (s *PublicBlockChainAPI) AddRelay(ctx context.Context, args AddRelayArgs) error {
+	return addRelay(ctx, args, s.b)
+}
+
+func addRelay(ctx context.Context, args AddRelayArgs, b MEVBackend) error {
+	return b.AddRelay(ctx, args.MEVRelay)
+}
+
+type RemoveRelayArgs struct {
+	MEVRelay string `json:"mevRelay"`
+}
+
+// RemoveRelay will submit the block to the miner worker
+func (s *PublicBlockChainAPI) RemoveRelay(ctx context.Context, args RemoveRelayArgs) error {
+	return removeRelay(ctx, args, s.b)
+}
+
+func removeRelay(ctx context.Context, args RemoveRelayArgs, b MEVBackend) error {
+	return b.RemoveRelay(ctx, args.MEVRelay)
+}
+
 // ExecutionResult groups all structured logs emitted by the EVM
 // while replaying a transaction in debug mode as well as transaction
 // execution status, the amount of gas used and the return value
@@ -2433,6 +2542,21 @@ func (api *PrivateDebugAPI) ChaindbCompact() error {
 // SetHead rewinds the head of the blockchain to a previous block.
 func (api *PrivateDebugAPI) SetHead(number hexutil.Uint64) {
 	api.b.SetHead(uint64(number))
+}
+
+// PublicMEVAPI provides an API to MEV endpoints.
+type PublicMEVAPI struct {
+	b Backend
+}
+
+// NewPublicMEVAPI creates a new MEV protocol API.
+func NewPublicMEVAPI(b Backend) *PublicMEVAPI {
+	return &PublicMEVAPI{b}
+}
+
+// ProposedBlock will submit the block to the miner worker
+func (s *PublicMEVAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) (*ProposedBlockResponse, error) {
+	return proposedBlock(ctx, args, s.b.CurrentBlock(), s.b)
 }
 
 // PublicNetAPI offers network related RPC methods

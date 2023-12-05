@@ -541,6 +541,19 @@ var (
 		Name:  "miner.noverify",
 		Usage: "Disable remote sealing verification",
 	}
+	MinerMEVRelaysFlag = cli.StringSliceFlag{
+		Name:  "miner.mevrelays",
+		Usage: "Destinations to register the validator each epoch. The miner will accept proposed blocks from these urls, if they are profitable.",
+	}
+	MinerMEVProposedBlockUriFlag = cli.StringFlag{
+		Name:  "miner.mevproposedblockuri",
+		Usage: "The uri MEV relays should send the proposedBlock to.",
+	}
+	MinerMEVProposedBlockNamespaceFlag = cli.StringFlag{
+		Name:  "miner.mevproposedblocknamespace",
+		Usage: "The namespace implements the proposedBlock function (default = eth). ",
+		Value: "eth",
+	}
 	// Account settings
 	UnlockedAccountFlag = cli.StringFlag{
 		Name:  "unlock",
@@ -634,6 +647,21 @@ var (
 	HTTPPathPrefixFlag = cli.StringFlag{
 		Name:  "http.rpcprefix",
 		Usage: "HTTP path path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
+		Value: "",
+	}
+	HTTPSecuredIPPortFlag = cli.IntFlag{
+		Name:  "http.securedipport",
+		Usage: "HTTP-RPC server secured by IP listening port",
+		Value: node.DefaultHTTPSecuredIPPort,
+	}
+	HTTPSecuredIPAllowedIPsFlag = cli.StringFlag{
+		Name:  "http.securedipallowedips",
+		Usage: "Comma separated list of IPs from which to accept requests (server enforced). Accepts '*' wildcard.",
+		Value: strings.Join(node.DefaultConfig.HTTPSecuredIPAllowedIPs, ","),
+	}
+	HTTPSecuredIPApiFlag = cli.StringFlag{
+		Name:  "http.securedipapi",
+		Usage: "Comma separated list of API's offered over the HTTP-RPC secured by IP interface",
 		Value: "",
 	}
 	GraphQLEnabledFlag = cli.BoolFlag{
@@ -1088,6 +1116,42 @@ func setHTTP(ctx *cli.Context, cfg *node.Config) {
 	}
 }
 
+// setHTTPSecuredIP creates the HTTP RPC listener interface secured by IP string from the set
+// command line flags, returning empty if the HTTP endpoint is disabled.
+func setHTTPSecuredIP(ctx *cli.Context, cfg *node.Config) {
+	if ctx.GlobalBool(HTTPEnabledFlag.Name) {
+		if cfg.HTTPHost == "" {
+			cfg.HTTPHost = "127.0.0.1"
+		}
+		if ctx.GlobalIsSet(HTTPListenAddrFlag.Name) {
+			cfg.HTTPHost = ctx.GlobalString(HTTPListenAddrFlag.Name)
+		}
+	}
+
+	if ctx.GlobalIsSet(HTTPSecuredIPPortFlag.Name) {
+		cfg.HTTPSecuredIPPort = ctx.GlobalInt(HTTPSecuredIPPortFlag.Name)
+	}
+
+	if ctx.GlobalIsSet(HTTPCORSDomainFlag.Name) {
+		cfg.HTTPCors = SplitAndTrim(ctx.GlobalString(HTTPCORSDomainFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(HTTPSecuredIPApiFlag.Name) {
+		cfg.HTTPSecuredIPModules = SplitAndTrim(ctx.GlobalString(HTTPSecuredIPApiFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(HTTPSecuredIPAllowedIPsFlag.Name) {
+		cfg.HTTPSecuredIPAllowedIPs = SplitAndTrim(ctx.GlobalString(HTTPSecuredIPAllowedIPsFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(HTTPPathPrefixFlag.Name) {
+		cfg.HTTPPathPrefix = ctx.GlobalString(HTTPPathPrefixFlag.Name)
+	}
+	if ctx.GlobalIsSet(AllowUnprotectedTxs.Name) {
+		cfg.AllowUnprotectedTxs = ctx.GlobalBool(AllowUnprotectedTxs.Name)
+	}
+}
+
 // setGraphQL creates the GraphQL listener interface string from the set
 // command line flags, returning empty if the GraphQL endpoint is disabled.
 func setGraphQL(ctx *cli.Context, cfg *node.Config) {
@@ -1348,6 +1412,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	SetP2PConfig(ctx, &cfg.P2P)
 	setIPC(ctx, cfg)
 	setHTTP(ctx, cfg)
+	setHTTPSecuredIP(ctx, cfg)
 	setGraphQL(ctx, cfg)
 	setWS(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
@@ -1566,6 +1631,10 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.GlobalBool(DisableVoteAttestationFlag.Name) {
 		cfg.DisableVoteAttestation = true
 	}
+
+	if ctx.GlobalIsSet(MinerMEVRelaysFlag.Name) {
+		cfg.MEVRelays = ctx.GlobalStringSlice(MinerMEVRelaysFlag.Name)
+	}
 }
 
 func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -1588,6 +1657,65 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 			Fatalf("Invalid whitelist hash %s: %v", parts[1], err)
 		}
 		cfg.Whitelist[number] = hash
+	}
+}
+
+func setMEV(ctx *cli.Context, ks *keystore.KeyStore, cfg *miner.Config) {
+	if len(cfg.MEVRelays) > 0 {
+		if ctx.GlobalIsSet(MinerMEVProposedBlockUriFlag.Name) {
+			cfg.ProposedBlockUri = ctx.GlobalString(MinerMEVProposedBlockUriFlag.Name)
+		}
+
+		if cfg.ProposedBlockNamespace == "" && ctx.GlobalIsSet(MinerMEVProposedBlockNamespaceFlag.Name) {
+			cfg.ProposedBlockNamespace = ctx.GlobalString(MinerMEVProposedBlockNamespaceFlag.Name)
+		}
+
+		account, err := ks.Find(accounts.Account{Address: cfg.Etherbase})
+		if err != nil {
+			Fatalf("Could not find the validator public address %v to sign the registerValidator message, %v", cfg.Etherbase, err)
+		}
+		registerHash := accounts.TextHash([]byte(cfg.ProposedBlockUri))
+		passwordList := MakePasswordList(ctx)
+		if passwordList == nil {
+			cfg.RegisterValidatorSignedHash, err = ks.SignHash(account, registerHash)
+			if err != nil {
+				Fatalf("Failed sign registerValidator message unlocked with error: %v", err)
+			}
+		} else {
+			passwordFound := false
+			for _, password := range passwordList {
+				cfg.RegisterValidatorSignedHash, err = ks.SignHashWithPassphrase(account, password, registerHash)
+				if err == nil {
+					passwordFound = true
+					break
+				}
+			}
+			if !passwordFound {
+				Fatalf("Failed sign registerValidator message with passphrase with error")
+			}
+		}
+
+		signature := make([]byte, crypto.SignatureLength)
+		copy(signature, cfg.RegisterValidatorSignedHash)
+		// verify the validator public address used to sign the registerValidator message
+		if len(signature) != crypto.SignatureLength {
+			Fatalf("signature used to sign registerValidator must be %d bytes long", crypto.SignatureLength)
+		}
+		if signature[crypto.RecoveryIDOffset] == 27 || signature[crypto.RecoveryIDOffset] == 28 {
+			signature[crypto.RecoveryIDOffset] -= 27 // Transform yellow paper V from 27/28 to 0/1
+		}
+		if signature[crypto.RecoveryIDOffset] != 0 && signature[crypto.RecoveryIDOffset] != 1 {
+			Fatalf("invalid Ethereum signature of the registerValidator (V is not 0, or 1, or 27 or 28), it is %v", cfg.RegisterValidatorSignedHash[crypto.RecoveryIDOffset])
+		}
+
+		rpk, err := crypto.SigToPub(registerHash, signature)
+		if err != nil {
+			Fatalf("Failed to get validator public address from the registerValidator signed message %v", err)
+		}
+		addr := crypto.PubkeyToAddress(*rpk)
+		if addr != account.Address {
+			Fatalf("Validator public Etherbase %v was not used to sign the registerValidator %v", account.Address, addr)
+		}
 	}
 }
 
@@ -1656,6 +1784,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
+	setMEV(ctx, ks, &cfg.Miner)
 
 	// Cap the cache allowance and tune the garbage collector
 	mem, err := gopsutil.VirtualMemory()

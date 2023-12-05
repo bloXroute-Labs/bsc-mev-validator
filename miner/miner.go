@@ -18,11 +18,16 @@
 package miner
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/pkg/errors"
+
+	"github.com/ethereum/go-ethereum/blxr/version"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -31,8 +36,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 // Backend wraps all methods required for mining. Only full node is capable
@@ -40,6 +47,85 @@ import (
 type Backend interface {
 	BlockChain() *core.BlockChain
 	TxPool() *core.TxPool
+}
+
+type ClientMap map[string]*rpc.Client
+
+type ClientMapping struct {
+	mx        *sync.RWMutex
+	clientMap ClientMap
+}
+
+func NewClientMap(relays []string) *ClientMapping {
+	c := &ClientMapping{
+		mx:        new(sync.RWMutex),
+		clientMap: make(ClientMap),
+	}
+
+	for _, relay := range relays {
+		client, err := rpc.Dial(relay)
+		if err != nil {
+			log.Warn("Failed to dial MEV relay", "dest", relay, "err", err)
+			continue
+		}
+
+		c.clientMap[relay] = client
+	}
+
+	return c
+}
+
+func (c *ClientMapping) Len() int {
+	c.mx.RLock()
+	defer c.mx.RUnlock()
+	return len(c.clientMap)
+}
+
+func (c *ClientMapping) Mapping() ClientMap {
+	clientMap := make(ClientMap, len(c.clientMap))
+
+	c.mx.RLock()
+	for k, v := range c.clientMap {
+		clientMap[k] = v
+	}
+	c.mx.RUnlock()
+
+	return clientMap
+}
+
+func (c *ClientMapping) Get(relay string) (*rpc.Client, bool) {
+	c.mx.RLock()
+	client, ok := c.clientMap[relay]
+	c.mx.RUnlock()
+
+	return client, ok
+}
+
+func (c *ClientMapping) Add(relay string) (*rpc.Client, error) {
+	c.mx.Lock()
+	defer c.mx.Unlock()
+
+	client, err := rpc.Dial(relay)
+	if err != nil {
+		return nil, err
+	}
+
+	c.clientMap[relay] = client
+
+	return client, nil
+}
+
+func (c *ClientMapping) Remove(relay string) error {
+	c.mx.Lock()
+	defer c.mx.Unlock()
+
+	if _, ok := c.clientMap[relay]; !ok {
+		return fmt.Errorf("relay %s not found", relay)
+	}
+
+	delete(c.clientMap, relay)
+
+	return nil
 }
 
 // Config is the configuration parameters of mining.
@@ -56,6 +142,11 @@ type Config struct {
 	Noverify               bool           // Disable remote mining solution verification(only useful in ethash).
 	VoteEnable             bool           // Whether to vote when mining
 	DisableVoteAttestation bool           // Whether to skip assembling vote attestation
+
+	MEVRelays                   []string `toml:",omitempty"` // RPC clients to register validator each epoch
+	ProposedBlockUri            string   `toml:",omitempty"` // received proposedBlocks on that uri
+	ProposedBlockNamespace      string   `toml:",omitempty"` // define the namespace of proposedBlock
+	RegisterValidatorSignedHash []byte   `toml:"-"`          // signed value of crypto.Keccak256([]byte(ProposedBlockUri))
 }
 
 // Miner creates blocks and searches for proof-of-work values.
@@ -70,6 +161,11 @@ type Miner struct {
 	stopCh   chan struct{}
 
 	wg sync.WaitGroup
+
+	mevRelays              *ClientMapping
+	proposedBlockUri       string
+	proposedBlockNamespace string
+	signedProposedBlockUri []byte
 }
 
 func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(header *types.Header) bool) *Miner {
@@ -81,6 +177,11 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 		startCh: make(chan common.Address),
 		stopCh:  make(chan struct{}),
 		worker:  newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, false),
+
+		mevRelays:              NewClientMap(config.MEVRelays),
+		proposedBlockUri:       config.ProposedBlockUri,
+		proposedBlockNamespace: config.ProposedBlockNamespace,
+		signedProposedBlockUri: config.RegisterValidatorSignedHash,
 	}
 	miner.wg.Add(1)
 	go miner.update()
@@ -101,9 +202,18 @@ func (miner *Miner) update() {
 		}
 	}()
 
+	chainBlockCh := make(chan core.ChainHeadEvent, chainHeadChanSize)
+
+	chainBlockSub := miner.eth.BlockChain().SubscribeChainBlockEvent(chainBlockCh)
+	defer chainBlockSub.Unsubscribe()
+
 	shouldStart := false
 	canStart := true
 	dlEventCh := events.Chan()
+
+	// miner started at the middle of an epoch, we want to register it
+	miner.registerValidator()
+
 	for {
 		select {
 		case ev := <-dlEventCh:
@@ -143,11 +253,19 @@ func (miner *Miner) update() {
 				miner.worker.start()
 			}
 			shouldStart = true
+
+		case block := <-chainBlockCh:
+			// ToDo check if epoch, if so send eth_registerValidator to list of Relays
+			if block.Block.NumberU64()%params.BSCChainConfig.Parlia.Epoch == 0 {
+				miner.registerValidator()
+			}
 		case <-miner.stopCh:
 			shouldStart = false
 			miner.worker.stop()
 		case <-miner.exitCh:
 			miner.worker.close()
+			return
+		case <-chainBlockSub.Err():
 			return
 		}
 	}
@@ -252,4 +370,144 @@ func (miner *Miner) GetSealingBlock(parent common.Hash, timestamp uint64, coinba
 // to the given channel.
 func (miner *Miner) SubscribePendingLogs(ch chan<- []*types.Log) event.Subscription {
 	return miner.worker.pendingLogsFeed.Subscribe(ch)
+}
+
+// ProposedBlock add the block to the list of works
+func (miner *Miner) ProposedBlock(ctx context.Context, mevRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions, unReverted map[common.Hash]struct{}) (simDuration time.Duration, err error) {
+	var (
+		isBlockSkipped bool
+		simWork        *bestProposedWork
+	)
+
+	endOfProposingWindow := time.Unix(int64(miner.eth.BlockChain().CurrentBlock().Time()+miner.worker.chainConfig.Parlia.Period), 0).Add(-miner.worker.config.DelayLeftOver)
+
+	timeout := time.Until(endOfProposingWindow)
+	if timeout <= 0 {
+		err = fmt.Errorf("proposed block is too late, end of proposing window %s, appeared %s later", endOfProposingWindow, common.PrettyDuration(timeout))
+		return
+	}
+
+	proposingCtx, proposingCancel := context.WithTimeout(ctx, timeout)
+	defer proposingCancel()
+
+	currentGasLimit := atomic.LoadUint64(miner.worker.currentGasLimit)
+	previousBlockGasLimit := atomic.LoadUint64(miner.worker.prevBlockGasLimit)
+	defer func() {
+		logCtx := []any{
+			"blockNumber", blockNumber,
+			"mevRelay", mevRelay,
+			"prevBlockHash", prevBlockHash.Hex(),
+			"proposedReward", reward,
+			"gasLimit", gasLimit,
+			"gasUsed", gasUsed,
+			"txCount", len(txs),
+			"unRevertedCount", len(unReverted),
+			"isBlockSkipped", isBlockSkipped,
+			"currentGasLimit", currentGasLimit,
+			"timestamp", time.Now().UTC().Format(timestampFormat),
+			"simDuration", simDuration,
+		}
+
+		if err != nil {
+			logCtx = append(logCtx, "err", err)
+		}
+
+		log.Debug("Received proposedBlock", logCtx...)
+	}()
+	isBlockSkipped = gasUsed > currentGasLimit
+	if isBlockSkipped {
+		err = fmt.Errorf("proposed block gasUsed %v exceeds the current block gas limit %v", gasUsed, currentGasLimit)
+		return
+	}
+	desiredGasLimit := core.CalcGasLimit(previousBlockGasLimit, miner.worker.config.GasCeil)
+	if desiredGasLimit != gasLimit {
+		log.Warn("proposedBlock has wrong gasLimit", "MEVRelay", mevRelay, "blockNumber", blockNumber, "validatorGasLimit", desiredGasLimit, "proposedBlockGasLimit", gasLimit)
+		err = fmt.Errorf("proposed block gasLimit %v is different than the validator gasLimit %v", gasLimit, desiredGasLimit)
+		return
+	}
+	args := &ProposedBlockArgs{
+		mevRelay:      mevRelay,
+		blockNumber:   blockNumber,
+		prevBlockHash: prevBlockHash,
+		blockReward:   reward,
+		gasLimit:      gasLimit,
+		gasUsed:       gasUsed,
+		txs:           txs,
+		unReverted:    unReverted,
+	}
+	simWork, simDuration, err = miner.worker.simulateProposedBlock(proposingCtx, args)
+	if err != nil {
+		err = fmt.Errorf("processing and simulating proposedBlock failed, %v", err)
+		return
+	}
+	if simWork == nil {
+		//  do not return error, when the block is skipped
+		return
+	}
+
+	select {
+	case <-proposingCtx.Done():
+		err = errors.WithMessage(proposingCtx.Err(), "failed to propose block due to context timeout")
+		return
+	case miner.worker.proposedCh <- &ProposedBlock{args: args, simulatedWork: simWork, simDuration: simDuration}:
+		return
+	}
+}
+
+func (miner *Miner) registerValidator() {
+	log.Info("register validator to MEV relays")
+	registerValidatorArgs := &ethapi.RegisterValidatorArgs{
+		Data:       []byte(miner.proposedBlockUri),
+		Signature:  miner.signedProposedBlockUri,
+		Namespace:  miner.proposedBlockNamespace,
+		CommitHash: version.CommitHash(),
+		GasCeil:    miner.worker.config.GasCeil,
+	}
+	for dest, destClient := range miner.mevRelays.Mapping() {
+		go func(dest string, destinationClient *rpc.Client, registerValidatorArgs *ethapi.RegisterValidatorArgs) {
+			var result any
+
+			if err := destinationClient.Call(
+				&result, "eth_registerValidator", registerValidatorArgs,
+			); err != nil {
+				log.Warn("Failed to register validator to MEV relay", "dest", dest, "err", err)
+				return
+			}
+
+			log.Debug("register validator to MEV relay", "dest", dest, "result", result)
+		}(dest, destClient, registerValidatorArgs)
+	}
+}
+
+func (miner *Miner) AddRelay(relay string) error {
+	client, err := miner.mevRelays.Add(relay)
+	if err != nil {
+		return err
+	}
+
+	log.Info("register validator to MEV relay", "dest", relay)
+	registerValidatorArgs := &ethapi.RegisterValidatorArgs{
+		Data:       []byte(miner.proposedBlockUri),
+		Signature:  miner.signedProposedBlockUri,
+		Namespace:  miner.proposedBlockNamespace,
+		CommitHash: version.CommitHash(),
+		GasCeil:    miner.worker.config.GasCeil,
+	}
+
+	var result any
+
+	if err = client.Call(
+		&result, "eth_registerValidator", registerValidatorArgs,
+	); err != nil {
+		log.Warn("Failed to register validator to MEV relay", "dest", relay, "err", err)
+		return err
+	}
+
+	log.Debug("register validator to MEV relay", "dest", relay, "result", result)
+
+	return nil
+}
+
+func (miner *Miner) RemoveRelay(relay string) error {
+	return miner.mevRelays.Remove(relay)
 }

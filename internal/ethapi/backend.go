@@ -40,6 +40,8 @@ import (
 // Backend interface provides the common API services (that are provided by
 // both full and light clients) with access to necessary functions.
 type Backend interface {
+	MEVBackend
+
 	// General Ethereum API
 	SyncProgress() ethereum.SyncProgress
 
@@ -100,6 +102,14 @@ type Backend interface {
 	Engine() consensus.Engine
 }
 
+// MEVBackend interface provides the common API services (that are provided by
+// both full and light clients) with access to MEV functions.
+type MEVBackend interface {
+	ProposedBlock(ctx context.Context, mevRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions, unRevertedHashes map[common.Hash]struct{}) (simDuration time.Duration, err error)
+	AddRelay(ctx context.Context, mevRelay string) error
+	RemoveRelay(ctx context.Context, mevRelay string) error
+}
+
 func GetAPIs(apiBackend Backend) []rpc.API {
 	nonceLock := new(AddrLocker)
 	return []rpc.API{
@@ -142,6 +152,11 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 			Version:   "1.0",
 			Service:   NewPrivateAccountAPI(apiBackend, nonceLock),
 			Public:    false,
+		}, {
+			Namespace: "mev",
+			Version:   "1.0",
+			Service:   NewPublicMEVAPI(apiBackend),
+			Public:    true,
 		},
 	}
 }

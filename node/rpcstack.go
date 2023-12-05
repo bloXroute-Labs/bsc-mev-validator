@@ -40,14 +40,16 @@ type httpConfig struct {
 	Modules            []string
 	CorsAllowedOrigins []string
 	Vhosts             []string
+	AllowedIPs         []string
 	prefix             string // path prefix on which to mount http handler
 }
 
 // wsConfig is the JSON-RPC/Websocket configuration
 type wsConfig struct {
-	Origins []string
-	Modules []string
-	prefix  string // path prefix on which to mount ws handler
+	Origins    []string
+	Modules    []string
+	AllowedIPs []string
+	prefix     string // path prefix on which to mount ws handler
 }
 
 type rpcHandler struct {
@@ -166,6 +168,8 @@ func (h *httpServer) start() error {
 		"prefix", h.httpConfig.prefix,
 		"cors", strings.Join(h.httpConfig.CorsAllowedOrigins, ","),
 		"vhosts", strings.Join(h.httpConfig.Vhosts, ","),
+		"allowedIPs", strings.Join(h.httpConfig.AllowedIPs, ","),
+		"modules", strings.Join(h.httpConfig.Modules, ","),
 	)
 
 	// Log all handlers mounted on server.
@@ -296,7 +300,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig) error {
 	}
 	h.httpConfig = config
 	h.httpHandler.Store(&rpcHandler{
-		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts),
+		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.AllowedIPs),
 		server:  srv,
 	})
 	return nil
@@ -373,10 +377,14 @@ func isWebsocket(r *http.Request) bool {
 }
 
 // NewHTTPHandlerStack returns wrapped http-related handlers
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string) http.Handler {
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, allowedIPs []string) http.Handler {
 	// Wrap the CORS-handler within a host-handler
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
+	if len(allowedIPs) > 0 {
+		handler = newIPHandler(allowedIPs, handler)
+	}
+
 	return newGzipHandler(handler)
 }
 
@@ -439,6 +447,40 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Error(w, "invalid host specified", http.StatusForbidden)
+}
+
+// SecuredIPHandler is a handler which validates the IP of incoming requests.
+type SecuredIPHandler struct {
+	ip   map[string]struct{}
+	next http.Handler
+}
+
+func newIPHandler(ips []string, next http.Handler) http.Handler {
+	vIPsMap := make(map[string]struct{})
+	for _, allowedIP := range ips {
+		vIPsMap[strings.ToLower(allowedIP)] = struct{}{}
+	}
+	return &SecuredIPHandler{vIPsMap, next}
+}
+
+// ServeHTTP serves JSON-RPC requests over HTTP, implements http.Handler
+func (h *SecuredIPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// if r.Host is not set, we can continue serving since a browser would set the Host header
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		// Either invalid (too many colons) or no port specified
+		ip = r.RemoteAddr
+	}
+	// Not an IP address, but a hostname. Need to validate
+	if _, exist := h.ip["*"]; exist {
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	if _, exist := h.ip[ip]; exist {
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	http.Error(w, "IP is not allowed", http.StatusForbidden)
 }
 
 var gzPool = sync.Pool{
