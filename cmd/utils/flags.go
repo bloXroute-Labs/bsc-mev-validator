@@ -541,6 +541,15 @@ var (
 		Name:  "miner.noverify",
 		Usage: "Disable remote sealing verification",
 	}
+	// Sentry settings
+	SentryMinerUriFlag = cli.StringFlag{
+		Name:  "sentry.mineruri",
+		Usage: "Uri used by the proxy forwarding blocks from the relay to the validator",
+	}
+	SentryRelaysUriFlag = cli.StringSliceFlag{
+		Name:  "sentry.relaysuri",
+		Usage: "Slice of MEV relay uris sending the registration from the validator node",
+	}
 	// Account settings
 	UnlockedAccountFlag = cli.StringFlag{
 		Name:  "unlock",
@@ -634,6 +643,21 @@ var (
 	HTTPPathPrefixFlag = cli.StringFlag{
 		Name:  "http.rpcprefix",
 		Usage: "HTTP path path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
+		Value: "",
+	}
+	HTTPSecuredIPPortFlag = cli.IntFlag{
+		Name:  "http.securedipport",
+		Usage: "HTTP-RPC server secured by IP listening port",
+		Value: node.DefaultHTTPSecuredIPPort,
+	}
+	HTTPSecuredIPAllowedIPsFlag = cli.StringFlag{
+		Name:  "http.securedipvallowedipss",
+		Usage: "Comma separated list of IPs from which to accept requests (server enforced). Accepts '*' wildcard.",
+		Value: strings.Join(node.DefaultConfig.HTTPSecuredIPAllowedIPs, ","),
+	}
+	HTTPSecuredIPApiFlag = cli.StringFlag{
+		Name:  "http.securedipapi",
+		Usage: "Comma separated list of API's offered over the HTTP-RPC secured by IP interface",
 		Value: "",
 	}
 	GraphQLEnabledFlag = cli.BoolFlag{
@@ -1088,6 +1112,42 @@ func setHTTP(ctx *cli.Context, cfg *node.Config) {
 	}
 }
 
+// setHTTPSecuredIP creates the HTTP MEV RPC listener interface string from the set
+// command line flags, returning empty if the HTTP endpoint is disabled.
+func setHTTPSecuredIP(ctx *cli.Context, cfg *node.Config) {
+	if ctx.GlobalBool(HTTPEnabledFlag.Name) {
+		if cfg.HTTPHost == "" {
+			cfg.HTTPHost = "127.0.0.1"
+		}
+		if ctx.GlobalIsSet(HTTPListenAddrFlag.Name) {
+			cfg.HTTPHost = ctx.GlobalString(HTTPListenAddrFlag.Name)
+		}
+	}
+
+	if ctx.GlobalIsSet(HTTPSecuredIPPortFlag.Name) {
+		cfg.HTTPSecuredIPPort = ctx.GlobalInt(HTTPSecuredIPPortFlag.Name)
+	}
+
+	if ctx.GlobalIsSet(HTTPCORSDomainFlag.Name) {
+		cfg.HTTPCors = SplitAndTrim(ctx.GlobalString(HTTPCORSDomainFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(HTTPSecuredIPApiFlag.Name) {
+		cfg.HTTPSecuredIPModules = SplitAndTrim(ctx.GlobalString(HTTPSecuredIPApiFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(HTTPSecuredIPAllowedIPsFlag.Name) {
+		cfg.HTTPSecuredIPAllowedIPs = SplitAndTrim(ctx.GlobalString(HTTPSecuredIPAllowedIPsFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(HTTPPathPrefixFlag.Name) {
+		cfg.HTTPPathPrefix = ctx.GlobalString(HTTPPathPrefixFlag.Name)
+	}
+	if ctx.GlobalIsSet(AllowUnprotectedTxs.Name) {
+		cfg.AllowUnprotectedTxs = ctx.GlobalBool(AllowUnprotectedTxs.Name)
+	}
+}
+
 // setGraphQL creates the GraphQL listener interface string from the set
 // command line flags, returning empty if the GraphQL endpoint is disabled.
 func setGraphQL(ctx *cli.Context, cfg *node.Config) {
@@ -1170,6 +1230,12 @@ func setLes(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(LightNoSyncServeFlag.Name) {
 		cfg.LightNoSyncServe = ctx.GlobalBool(LightNoSyncServeFlag.Name)
 	}
+}
+
+// setSentry configures the sentry settings from the command line flags.
+func setSentry(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.SentryMinerUri = ctx.GlobalString(SentryMinerUriFlag.Name)
+	cfg.SentryRelaysUri = ctx.GlobalStringSlice(SentryRelaysUriFlag.Name)
 }
 
 // setMonitors enable monitors from the command line flags.
@@ -1348,6 +1414,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	SetP2PConfig(ctx, &cfg.P2P)
 	setIPC(ctx, cfg)
 	setHTTP(ctx, cfg)
+	setHTTPSecuredIP(ctx, cfg)
 	setGraphQL(ctx, cfg)
 	setWS(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
@@ -1656,6 +1723,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
+	setSentry(ctx, cfg)
 
 	// Cap the cache allowance and tune the garbage collector
 	mem, err := gopsutil.VirtualMemory()

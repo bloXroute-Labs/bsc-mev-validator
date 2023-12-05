@@ -85,6 +85,8 @@ type Backend interface {
 	TxPoolContent() (map[common.Address]types.Transactions, map[common.Address]types.Transactions)
 	TxPoolContentFrom(addr common.Address) (types.Transactions, types.Transactions)
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
+	RegisterValidator(ctx context.Context, args *RegisterValidatorArgs) error
+	ProposedBlock(ctx context.Context, args *ProposedBlockArgs, namespace string) (any, error)
 
 	// Filter API
 	BloomStatus() (uint64, uint64)
@@ -142,6 +144,11 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 			Version:   "1.0",
 			Service:   NewPrivateAccountAPI(apiBackend, nonceLock),
 			Public:    false,
+		}, {
+			Namespace: "mev",
+			Version:   "1.0",
+			Service:   NewPublicMEVAPI(apiBackend),
+			Public:    true,
 		},
 	}
 }

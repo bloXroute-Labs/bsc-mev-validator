@@ -1755,6 +1755,16 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 	}
 }
 
+// ProposedBlock will submit the block to the miner worker
+func (s *PublicBlockChainAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) (any, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+		return s.b.ProposedBlock(ctx, &args, "eth")
+	}
+}
+
 // PublicTransactionPoolAPI exposes methods for the RPC interface
 type PublicTransactionPoolAPI struct {
 	b         Backend
@@ -2347,6 +2357,28 @@ func (s *PublicTransactionPoolAPI) Resend(ctx context.Context, sendArgs Transact
 	return common.Hash{}, fmt.Errorf("transaction %#x not found", matchTx.Hash())
 }
 
+// RegisterValidatorArgs represents the arguments to register a validator.
+type RegisterValidatorArgs struct {
+	Data       hexutil.Bytes `json:"data"` // bytes of string with callback ProposedBlockUri
+	Signature  hexutil.Bytes `json:"signature"`
+	IsSentry   bool          `json:"isSentry"`
+	Namespace  string        `json:"namespace"`
+	CommitHash string        `json:"commitHash,omitempty"`
+	GasCeil    uint64        `json:"gasCeil"`
+}
+
+// RegisterValidator registers a validator for the next epoch to the pool of proposing destinations.
+func (s *PublicTransactionPoolAPI) RegisterValidator(ctx context.Context, args RegisterValidatorArgs) error {
+	args.IsSentry = true
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return s.b.RegisterValidator(ctx, &args)
+	}
+}
+
 // PublicDebugAPI is the collection of Ethereum APIs exposed over the public
 // debugging endpoint.
 type PublicDebugAPI struct {
@@ -2433,6 +2465,38 @@ func (api *PrivateDebugAPI) ChaindbCompact() error {
 // SetHead rewinds the head of the blockchain to a previous block.
 func (api *PrivateDebugAPI) SetHead(number hexutil.Uint64) {
 	api.b.SetHead(uint64(number))
+}
+
+// PublicMEVAPI provides an API to MEV endpoints.
+type PublicMEVAPI struct {
+	b Backend
+}
+
+// NewPublicMEVAPI creates a new MEV protocol API.
+func NewPublicMEVAPI(b Backend) *PublicMEVAPI {
+	return &PublicMEVAPI{b}
+}
+
+// ProposedBlockArgs are the arguments for the ProposedBlock RPC
+type ProposedBlockArgs struct {
+	MEVRelay         string          `json:"mevRelay,omitempty"`
+	BlockNumber      rpc.BlockNumber `json:"blockNumber"`
+	PrevBlockHash    common.Hash     `json:"prevBlockHash"`
+	BlockReward      *big.Int        `json:"blockReward"`
+	GasLimit         uint64          `json:"gasLimit"`
+	GasUsed          uint64          `json:"gasUsed"`
+	Payload          any             `json:"payload"`
+	UnRevertedHashes []common.Hash   `json:"unRevertedHashes,omitempty"`
+}
+
+// ProposedBlock will submit the block to the miner worker
+func (s *PublicMEVAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) (any, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+		return s.b.ProposedBlock(ctx, &args, "mev")
+	}
 }
 
 // PublicNetAPI offers network related RPC methods
