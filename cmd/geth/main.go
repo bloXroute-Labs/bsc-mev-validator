@@ -25,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/automaxprocs/maxprocs"
+
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/cmd/utils"
@@ -38,7 +40,6 @@ import (
 	"github.com/ethereum/go-ethereum/internal/flags"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
-	"go.uber.org/automaxprocs/maxprocs"
 
 	// Force-load the tracer engines to trigger registration
 	_ "github.com/ethereum/go-ethereum/eth/tracers/js"
@@ -166,7 +167,7 @@ var (
 		utils.BLSPasswordFileFlag,
 		utils.BLSWalletDirFlag,
 		utils.VoteJournalDirFlag,
-	}, utils.NetworkFlags, utils.DatabasePathFlags)
+	}, utils.NetworkFlags, utils.DatabasePathFlags, utils.HTTPSecuredFlags, utils.MinerMEVFlags)
 
 	rpcFlags = []cli.Flag{
 		utils.HTTPEnabledFlag,

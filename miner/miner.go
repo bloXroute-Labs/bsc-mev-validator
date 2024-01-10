@@ -56,6 +56,11 @@ type Config struct {
 
 	NewPayloadTimeout      time.Duration // The maximum time allowance for creating a new payload
 	DisableVoteAttestation bool          // Whether to skip assembling vote attestation
+
+	MEVRelays                   []string `toml:",omitempty"` // RPC clients to register validator each epoch
+	ProposedBlockUri            string   `toml:",omitempty"` // received proposedBlocks on that uri
+	ProposedBlockNamespace      string   `toml:",omitempty"` // define the namespace of proposedBlock
+	RegisterValidatorSignedHash []byte   `toml:"-"`          // signed value of crypto.Keccak256([]byte(ProposedBlockUri))
 }
 
 // DefaultConfig contains default settings for miner.
@@ -83,6 +88,11 @@ type Miner struct {
 	worker  *worker
 
 	wg sync.WaitGroup
+
+	mevRelays              *ClientMapping
+	proposedBlockUri       string
+	proposedBlockNamespace string
+	signedProposedBlockUri []byte
 }
 
 func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(header *types.Header) bool) *Miner {
@@ -94,6 +104,11 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 		startCh: make(chan struct{}),
 		stopCh:  make(chan struct{}),
 		worker:  newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, false),
+
+		mevRelays:              NewClientMap(config.MEVRelays),
+		proposedBlockUri:       config.ProposedBlockUri,
+		proposedBlockNamespace: config.ProposedBlockNamespace,
+		signedProposedBlockUri: config.RegisterValidatorSignedHash,
 	}
 	miner.wg.Add(1)
 	go miner.update()
@@ -114,9 +129,18 @@ func (miner *Miner) update() {
 		}
 	}()
 
+	chainBlockCh := make(chan core.ChainHeadEvent, chainHeadChanSize)
+
+	chainBlockSub := miner.eth.BlockChain().SubscribeChainBlockEvent(chainBlockCh)
+	defer chainBlockSub.Unsubscribe()
+
 	shouldStart := false
 	canStart := true
 	dlEventCh := events.Chan()
+
+	// miner started at the middle of an epoch, we want to register it
+	miner.registerValidator()
+
 	for {
 		select {
 		case ev := <-dlEventCh:
@@ -159,11 +183,18 @@ func (miner *Miner) update() {
 				miner.worker.start()
 			}
 			shouldStart = true
+
+		case block := <-chainBlockCh:
+			if isNewEpoch(block.Block) {
+				miner.registerValidator()
+			}
 		case <-miner.stopCh:
 			shouldStart = false
 			miner.worker.stop()
 		case <-miner.exitCh:
 			miner.worker.close()
+			return
+		case <-chainBlockSub.Err():
 			return
 		}
 	}

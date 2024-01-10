@@ -30,9 +30,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rs/cors"
+
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/rs/cors"
 )
 
 // httpConfig is the JSON-RPC/HTTP configuration.
@@ -40,15 +41,17 @@ type httpConfig struct {
 	Modules            []string
 	CorsAllowedOrigins []string
 	Vhosts             []string
+	AllowedIPs         []string
 	prefix             string // path prefix on which to mount http handler
 	rpcEndpointConfig
 }
 
 // wsConfig is the JSON-RPC/Websocket configuration
 type wsConfig struct {
-	Origins []string
-	Modules []string
-	prefix  string // path prefix on which to mount ws handler
+	Origins    []string
+	Modules    []string
+	AllowedIPs []string
+	prefix     string // path prefix on which to mount ws handler
 	rpcEndpointConfig
 }
 
@@ -175,6 +178,8 @@ func (h *httpServer) start() error {
 		"prefix", h.httpConfig.prefix,
 		"cors", strings.Join(h.httpConfig.CorsAllowedOrigins, ","),
 		"vhosts", strings.Join(h.httpConfig.Vhosts, ","),
+		"allowedIPs", strings.Join(h.httpConfig.AllowedIPs, ","),
+		"modules", strings.Join(h.httpConfig.Modules, ","),
 	)
 
 	// Log all handlers mounted on server.
@@ -309,7 +314,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig) error {
 	}
 	h.httpConfig = config
 	h.httpHandler.Store(&rpcHandler{
-		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.jwtSecret),
+		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.jwtSecret, config.AllowedIPs),
 		server:  srv,
 	})
 	return nil
@@ -386,14 +391,15 @@ func isWebsocket(r *http.Request) bool {
 }
 
 // NewHTTPHandlerStack returns wrapped http-related handlers
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, jwtSecret []byte) http.Handler {
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, jwtSecret []byte, allowedIPs []string) http.Handler {
 	// Wrap the CORS-handler within a host-handler
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
 	if len(jwtSecret) != 0 {
 		handler = newJWTHandler(jwtSecret, handler)
 	}
-	return newGzipHandler(handler)
+
+	return newGzipHandler(newIPHandler(allowedIPs, handler))
 }
 
 // NewWSHandlerStack returns a wrapped ws-related handler.
