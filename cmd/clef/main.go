@@ -35,6 +35,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/cmd/utils"
@@ -54,9 +58,6 @@ import (
 	"github.com/ethereum/go-ethereum/signer/fourbyte"
 	"github.com/ethereum/go-ethereum/signer/rules"
 	"github.com/ethereum/go-ethereum/signer/storage"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
-	"github.com/urfave/cli/v2"
 )
 
 const legalWarning = `
@@ -738,7 +739,7 @@ func signer(c *cli.Context) error {
 		if err != nil {
 			utils.Fatalf("Could not register API: %w", err)
 		}
-		handler := node.NewHTTPHandlerStack(srv, cors, vhosts, nil)
+		handler := node.NewHTTPHandlerStack(srv, cors, vhosts, nil, nil)
 
 		// set port
 		port := c.Int(rpcPortFlag.Name)

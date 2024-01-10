@@ -24,12 +24,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/graph-gophers/graphql-go"
+	gqlErrors "github.com/graph-gophers/graphql-go/errors"
+
 	"github.com/ethereum/go-ethereum/eth/filters"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/graph-gophers/graphql-go"
-	gqlErrors "github.com/graph-gophers/graphql-go/errors"
 )
 
 type handler struct {
@@ -119,7 +120,7 @@ func newHandler(stack *node.Node, backend ethapi.Backend, filterSystem *filters.
 		return nil, err
 	}
 	h := handler{Schema: s}
-	handler := node.NewHTTPHandlerStack(h, cors, vhosts, nil)
+	handler := node.NewHTTPHandlerStack(h, cors, vhosts, nil, nil)
 
 	stack.RegisterHandler("GraphQL UI", "/graphql/ui", GraphiQL{})
 	stack.RegisterHandler("GraphQL UI", "/graphql/ui/", GraphiQL{})
