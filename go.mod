@@ -1,8 +1,10 @@
 module github.com/ethereum/go-ethereum
 
-go 1.21
+go 1.21.4
 
 toolchain go1.21.5
+
+require github.com/bloXroute-Labs/bx-mev-tools/pkg/maputil v0.0.0-20231218204341-427df0534ddf
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v0.3.0
