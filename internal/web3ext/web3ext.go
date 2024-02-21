@@ -29,6 +29,7 @@ var Modules = map[string]string{
 	"rpc":      RpcJs,
 	"txpool":   TxpoolJs,
 	"dev":      DevJs,
+	"mev":      MEVJs,
 }
 
 const CliqueJs = `
@@ -612,6 +613,21 @@ web3._extend({
 		new web3._extend.Method({
 			name: 'getBlockReceipts',
 			call: 'eth_getBlockReceipts',
+			params: 1,
+		}),
+		new web3._extend.Method({
+			name: 'proposedBlock',
+			call: 'eth_proposedBlock',
+			params: 1,
+		}),
+		new web3._extend.Method({
+			name: 'addRelay',
+			call: 'eth_addRelay',
+			params: 1,
+		}),
+		new web3._extend.Method({
+			name: 'removeRelay',
+			call: 'eth_removeRelay',
 			params: 1,
 		}),
 	],

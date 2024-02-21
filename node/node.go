@@ -60,6 +60,7 @@ type Node struct {
 	lifecycles    []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
 	rpcAPIs       []rpc.API   // List of APIs currently provided by the node
 	http          *httpServer //
+	httpSecuredIP *httpServer
 	ws            *httpServer //
 	httpAuth      *httpServer //
 	wsAuth        *httpServer //
@@ -118,7 +119,12 @@ func New(conf *Config) (*Node, error) {
 				rotateHours = *conf.LogConfig.RotateHours
 			}
 
-			log.Root().SetHandler(log.NewFileLvlHandler(logFilePath, *conf.LogConfig.MaxBytesSize, *conf.LogConfig.Level, rotateHours))
+			maxBackups := uint(0)
+			if conf.LogConfig.MaxBackups != nil {
+				maxBackups = *conf.LogConfig.MaxBackups
+			}
+
+			log.Root().SetHandler(log.NewFileLvlHandler(logFilePath, *conf.LogConfig.MaxBytesSize, maxBackups, *conf.LogConfig.Level, rotateHours))
 		}
 	}
 	if conf.Logger == nil {
@@ -185,6 +191,7 @@ func New(conf *Config) (*Node, error) {
 	// Configure RPC servers.
 	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
 	node.httpAuth = newHTTPServer(node.log, conf.HTTPTimeouts)
+	node.httpSecuredIP = newHTTPServer(node.log, conf.HTTPTimeouts)
 	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
 	node.wsAuth = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
 	node.ipc = newIPCServer(node.log, conf.IPCEndpoint())
@@ -514,6 +521,11 @@ func (n *Node) startRPC() error {
 		return nil
 	}
 
+	// Configure HTTP secured by IP.
+	if err := configureHTTPSecured(n, &servers); err != nil {
+		return err
+	}
+
 	// Set up HTTP.
 	if n.config.HTTPHost != "" {
 		// Configure legacy unauthenticated HTTP.
@@ -560,6 +572,7 @@ func (n *Node) wsServerForPort(port int, authenticated bool) *httpServer {
 
 func (n *Node) stopRPC() {
 	n.http.stop()
+	n.httpSecuredIP.stop()
 	n.ws.stop()
 	n.httpAuth.stop()
 	n.wsAuth.stop()

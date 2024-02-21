@@ -156,6 +156,19 @@ type Config struct {
 	// for the authenticated api. This is by default {'localhost'}.
 	AuthVirtualHosts []string `toml:",omitempty"`
 
+	// HTTPSecuredIPPort is the TCP port number on which to start the HTTP RPC server secured by IP. The
+	// default zero value is/ valid and will pick a port number randomly (useful
+	// for ephemeral nodes).
+	HTTPSecuredIPPort int `toml:",omitempty"`
+
+	// HTTPSecuredIPAllowedIPs is the list of IPs which are allowed on incoming requests.
+	HTTPSecuredIPAllowedIPs []string `toml:",omitempty"`
+
+	// HTTPSecuredIPModules is a list of API modules to expose via the HTTP RPC secured by IP interface.
+	// If the module list is empty, all RPC API endpoints designated public will be
+	// exposed.
+	HTTPSecuredIPModules []string `toml:",omitempty"`
+
 	// WSHost is the host interface on which to start the websocket RPC server. If
 	// this field is empty, no websocket API endpoint will be started.
 	WSHost string
@@ -513,6 +526,7 @@ type LogConfig struct {
 	MaxBytesSize *uint   `toml:",omitempty"`
 	Level        *string `toml:",omitempty"`
 	RotateHours  *uint   `toml:",omitempty"`
+	MaxBackups   *uint   `toml:",omitempty"`
 
 	// TermTimeFormat is the time format used for console logging.
 	TermTimeFormat *string `toml:",omitempty"`
