@@ -197,6 +197,15 @@ type Config struct {
 
 	// OverrideVerkle (TODO: remove after the fork)
 	OverrideVerkle *uint64 `toml:",omitempty"`
+
+	// OverrideFeynman (TODO: remove after the fork)
+	OverrideFeynman *uint64 `toml:",omitempty"`
+
+	// SentryMinerUri is the sentry miner uri
+	SentryMinerUri string `toml:",omitempty"`
+
+	// SentryRelaysUri is the list of sentry relay uri
+	SentryRelaysUri []string `toml:",omitempty"`
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.
