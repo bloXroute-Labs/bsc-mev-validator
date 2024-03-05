@@ -1,8 +1,10 @@
 module github.com/ethereum/go-ethereum
 
-go 1.21
+go 1.21.4
 
 toolchain go1.21.5
+
+require github.com/bloXroute-Labs/bx-mev-tools/pkg/maputil v0.0.0-20231218204341-427df0534ddf
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v0.3.0
@@ -293,5 +295,5 @@ replace (
 	github.com/cometbft/cometbft => github.com/bnb-chain/greenfield-tendermint v0.0.0-20230417032003-4cda1f296fb2
 	github.com/grpc-ecosystem/grpc-gateway/v2 => github.com/prysmaticlabs/grpc-gateway/v2 v2.3.1-0.20210702154020-550e1cd83ec1
 	github.com/syndtr/goleveldb v1.0.1 => github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
-	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.15
+	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.16
 )

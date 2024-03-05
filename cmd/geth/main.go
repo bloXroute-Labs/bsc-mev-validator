@@ -74,6 +74,7 @@ var (
 		utils.OverrideKepler,
 		utils.OverrideCancun,
 		utils.OverrideVerkle,
+		utils.OverrideFeynman,
 		utils.EnablePersonal,
 		utils.TxPoolLocalsFlag,
 		utils.TxPoolNoLocalsFlag,
@@ -170,7 +171,7 @@ var (
 		utils.BLSPasswordFileFlag,
 		utils.BLSWalletDirFlag,
 		utils.VoteJournalDirFlag,
-	}, utils.NetworkFlags, utils.DatabasePathFlags)
+	}, utils.NetworkFlags, utils.DatabasePathFlags, utils.HTTPSecuredFlags, utils.MinerMEVFlags)
 
 	rpcFlags = []cli.Flag{
 		utils.HTTPEnabledFlag,

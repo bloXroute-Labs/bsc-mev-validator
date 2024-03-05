@@ -219,31 +219,42 @@ type worker struct {
 	fullTaskHook      func()                             // Method to call before pushing the full sealing task.
 	resubmitHook      func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
 	recentMinedBlocks *lru.Cache
+
+	// Proposed block
+	bestProposedBlockLock sync.RWMutex
+	// Key (k): The block number (blockNum)
+	// Value (v): A nested map representing the mapping between (k - prevBlockHash) and the corresponding proposed work(v - environment,reward)
+	bestProposedBlockInfo map[uint64]bestProposedWorks
+	currentGasLimit       *uint64
+	prevBlockGasLimit     *uint64
 }
 
 func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(header *types.Header) bool, init bool) *worker {
 	recentMinedBlocks, _ := lru.New(recentMinedCacheLimit)
 	worker := &worker{
-		prefetcher:         core.NewStatePrefetcher(chainConfig, eth.BlockChain(), engine),
-		config:             config,
-		chainConfig:        chainConfig,
-		engine:             engine,
-		eth:                eth,
-		chain:              eth.BlockChain(),
-		mux:                mux,
-		isLocalBlock:       isLocalBlock,
-		coinbase:           config.Etherbase,
-		extra:              config.ExtraData,
-		pendingTasks:       make(map[common.Hash]*task),
-		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
-		newWorkCh:          make(chan *newWorkReq),
-		getWorkCh:          make(chan *getWorkReq),
-		taskCh:             make(chan *task),
-		resultCh:           make(chan *types.Block, resultQueueSize),
-		startCh:            make(chan struct{}, 1),
-		exitCh:             make(chan struct{}),
-		resubmitIntervalCh: make(chan time.Duration),
-		recentMinedBlocks:  recentMinedBlocks,
+		prefetcher:            core.NewStatePrefetcher(chainConfig, eth.BlockChain(), engine),
+		config:                config,
+		chainConfig:           chainConfig,
+		engine:                engine,
+		eth:                   eth,
+		chain:                 eth.BlockChain(),
+		mux:                   mux,
+		isLocalBlock:          isLocalBlock,
+		coinbase:              config.Etherbase,
+		extra:                 config.ExtraData,
+		pendingTasks:          make(map[common.Hash]*task),
+		chainHeadCh:           make(chan core.ChainHeadEvent, chainHeadChanSize),
+		newWorkCh:             make(chan *newWorkReq),
+		getWorkCh:             make(chan *getWorkReq),
+		taskCh:                make(chan *task),
+		resultCh:              make(chan *types.Block, resultQueueSize),
+		startCh:               make(chan struct{}, 1),
+		exitCh:                make(chan struct{}),
+		resubmitIntervalCh:    make(chan time.Duration),
+		recentMinedBlocks:     recentMinedBlocks,
+		currentGasLimit:       new(uint64),
+		prevBlockGasLimit:     new(uint64),
+		bestProposedBlockInfo: make(map[uint64]bestProposedWorks),
 	}
 	// Subscribe events for blockchain
 	worker.chainHeadSub = eth.BlockChain().SubscribeChainHeadEvent(worker.chainHeadCh)
@@ -267,11 +278,12 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	}
 	worker.newpayloadTimeout = newpayloadTimeout
 
-	worker.wg.Add(4)
+	worker.wg.Add(5)
 	go worker.mainLoop()
 	go worker.newWorkLoop(recommit)
 	go worker.resultLoop()
 	go worker.taskLoop()
+	go worker.proposedLoop()
 
 	// Submit first work to initialize pending state.
 	if init {
@@ -408,7 +420,14 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 	for {
 		select {
 		case <-w.startCh:
-			clearPending(w.chain.CurrentBlock().Number.Uint64())
+			currentChainNumber := w.chain.CurrentBlock().Number.Uint64()
+			clearPending(currentChainNumber)
+			w.bestProposedBlockLock.Lock()
+			if proposedWorks, ok := w.bestProposedBlockInfo[currentChainNumber]; ok {
+				proposedWorks.discard()
+				delete(w.bestProposedBlockInfo, currentChainNumber)
+			}
+			w.bestProposedBlockLock.Unlock()
 			timestamp = time.Now().Unix()
 			commit(commitInterruptNewHead)
 
@@ -689,18 +708,23 @@ func (w *worker) updateSnapshot(env *environment) {
 }
 
 func (w *worker) commitTransaction(env *environment, tx *txpool.Transaction, receiptProcessors ...core.ReceiptProcessor) ([]*types.Log, error) {
+	return w.commitTransactionOld(env, tx.Tx, receiptProcessors...)
+}
+
+// TODO: (Michael Kalashnikov) [BEFORE v1.3.5] check how can it handled in native way instead of creating separate method.
+func (w *worker) commitTransactionOld(env *environment, tx *types.Transaction, receiptProcessors ...core.ReceiptProcessor) ([]*types.Log, error) {
 	var (
 		snap = env.state.Snapshot()
 		gp   = env.gasPool.Gas()
 	)
 
-	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx.Tx, &env.header.GasUsed, *w.chain.GetVMConfig(), receiptProcessors...)
+	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, *w.chain.GetVMConfig(), receiptProcessors...)
 	if err != nil {
 		env.state.RevertToSnapshot(snap)
 		env.gasPool.SetGas(gp)
 		return nil, err
 	}
-	env.txs = append(env.txs, tx.Tx)
+	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
 
 	return receipt.Logs, nil
@@ -724,7 +748,7 @@ func (w *worker) commitTransactions(env *environment, txs *transactionsByPriceAn
 
 	stopPrefetchCh := make(chan struct{})
 	defer close(stopPrefetchCh)
-	//prefetch txs from all pending txs
+	// prefetch txs from all pending txs
 	txsPrefetch := txs.Copy()
 	tx := txsPrefetch.PeekWithUnwrap()
 	if tx != nil {
@@ -909,8 +933,10 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 		return nil, err
 	}
 
-	// Handle upgrade build-in system contract code
-	systemcontracts.UpgradeBuildInSystemContract(w.chainConfig, header.Number, parent.Time, header.Time, env.state)
+	if !w.chainConfig.IsFeynman(header.Number, header.Time) {
+		// Handle upgrade build-in system contract code
+		systemcontracts.UpgradeBuildInSystemContract(w.chainConfig, header.Number, parent.Time, header.Time, env.state)
+	}
 
 	return env, nil
 }
@@ -967,8 +993,12 @@ func (w *worker) generateWork(params *generateParams) (*types.Block, *big.Int, e
 			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout))
 		}
 	}
-	fees := work.state.GetBalance(consensus.SystemAddress)
-	block, _, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, nil, work.receipts, params.withdrawals)
+
+	bestWork := work.copy()
+	defer func() { bestWork.discard() }() // wrapping with a function since we reassign bestWork later
+
+	fees := bestWork.state.GetBalance(consensus.SystemAddress)
+	block, _, err := w.engine.FinalizeAndAssemble(w.chain, bestWork.header, bestWork.state, bestWork.txs, nil, bestWork.receipts, params.withdrawals)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1029,6 +1059,7 @@ LOOP:
 		}
 		prevWork = work
 		workList = append(workList, work)
+		atomic.StoreUint64(w.currentGasLimit, work.header.GasLimit)
 
 		delay := w.engine.Delay(w.chain, work.header, &w.config.DelayLeftOver)
 		if delay == nil {
@@ -1131,15 +1162,16 @@ LOOP:
 	}
 	// get the most profitable work
 	bestWork := workList[0]
-	bestReward := new(big.Int)
+	bestReward := big.NewInt(0)
 	for i, wk := range workList {
 		balance := wk.state.GetBalance(consensus.SystemAddress)
 		log.Debug("Get the most profitable work", "index", i, "balance", balance, "bestReward", bestReward)
 		if balance.Cmp(bestReward) > 0 {
 			bestWork = wk
-			bestReward = balance
+			bestReward.Set(balance)
 		}
 	}
+	bestWork = w.getBestWorkBetweenInternalAndProposedBlock(bestWork, callerTypeCommitWork)
 	w.commit(bestWork, w.fullTaskHook, true, start)
 
 	// Swap out the old work with the new one, terminating any leftover
