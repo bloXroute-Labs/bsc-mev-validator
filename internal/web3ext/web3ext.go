@@ -29,6 +29,7 @@ var Modules = map[string]string{
 	"rpc":      RpcJs,
 	"txpool":   TxpoolJs,
 	"dev":      DevJs,
+	"mev":      MEVJs,
 }
 
 const CliqueJs = `
@@ -508,6 +509,16 @@ const EthJs = `
 web3._extend({
 	property: 'eth',
 	methods: [
+		new web3._extend.Method({
+			name: 'registerValidator',
+			call: 'eth_registerValidator',
+			params: 1
+		}),
+		new web3._extend.Method({
+			name: 'proposedBlock',
+			call: 'eth_proposedBlock',
+			params: 1,
+		}),
 		new web3._extend.Method({
 			name: 'chainId',
 			call: 'eth_chainId',

@@ -1,8 +1,8 @@
 module github.com/ethereum/go-ethereum
 
-go 1.21
+go 1.21.5
 
-toolchain go1.21.5
+require github.com/bloXroute-Labs/bx-mev-tools/pkg/ctxutil v0.0.0-20231205235455-2dae53b15129
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v0.3.0
