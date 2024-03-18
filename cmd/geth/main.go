@@ -172,7 +172,7 @@ var (
 		utils.BLSPasswordFileFlag,
 		utils.BLSWalletDirFlag,
 		utils.VoteJournalDirFlag,
-	}, utils.NetworkFlags, utils.DatabasePathFlags)
+	}, utils.NetworkFlags, utils.DatabasePathFlags, utils.HTTPSecuredFlags, utils.MinerMEVFlags)
 
 	rpcFlags = []cli.Flag{
 		utils.HTTPEnabledFlag,
