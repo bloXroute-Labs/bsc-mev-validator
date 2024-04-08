@@ -45,7 +45,7 @@ var (
 )
 
 // DefaultConfig contains reasonable default settings.
-var DefaultConfig = Config{
+var DefaultConfig = *WithDefaultHTTPSecuredIP(&Config{
 	DataDir:              DefaultDataDir(),
 	HTTPPort:             DefaultHTTPPort,
 	AuthAddr:             DefaultAuthHost,
@@ -66,7 +66,7 @@ var DefaultConfig = Config{
 		NAT:           nat.Any(),
 	},
 	DBEngine: "", // Use whatever exists, will default to Leveldb if non-existent and supported
-}
+})
 
 // DefaultDataDir is the default data directory to use for the databases and other
 // persistence requirements.
